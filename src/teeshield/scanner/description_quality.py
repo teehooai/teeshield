@@ -194,7 +194,11 @@ def _extract_tools(path: Path) -> list[dict]:
             desc = (match.group(3) or match.group(4) or match.group(5) or "").strip()
             # Clean up multi-line template literals
             desc = re.sub(r"\s*\n\s*", " ", desc).strip()
-            if name and name not in existing_names:
+            # Skip names that look like display labels (contain spaces or special chars)
+            # MCP tool names are identifiers: snake_case, kebab-case, or camelCase
+            if not name or " " in name or not re.match(r'^[a-zA-Z_][\w.-]*$', name):
+                continue
+            if name not in existing_names:
                 tools.append({"name": name, "description": desc})
                 existing_names.add(name)
 

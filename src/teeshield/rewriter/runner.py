@@ -132,7 +132,7 @@ def _rewrite_local(tool: dict, all_tools: list[dict]) -> str:
 
     # 1. Build action-oriented opening
     first_word = name_lower.split("_")[0] if "_" in name_lower else name_lower
-    verb = VERB_MAP.get(first_word, desc.split()[0] if desc else "Perform")
+    verb = VERB_MAP.get(first_word, "")
 
     # Clean up original description -- strip any leading verb so we don't double-prefix
     clean_desc = desc.strip().rstrip(".")
@@ -147,9 +147,24 @@ def _rewrite_local(tool: dict, all_tools: list[dict]) -> str:
     if leading_verb:
         clean_desc = clean_desc[leading_verb.end():]
 
-    opening = f"{verb} {clean_desc}." if clean_desc else f"{verb} the {name.replace('_', ' ')} operation."
+    # Avoid stuttering: if the verb (or a form of it) already appears near the
+    # start of clean_desc, don't prepend it again.
+    if verb and clean_desc:
+        first_words = clean_desc.lower().split()[:5]
+        verb_stem = verb.lower().rstrip("es").rstrip("s")
+        already_has_verb = any(w.startswith(verb_stem) for w in first_words)
+        if already_has_verb:
+            # Capitalize first letter and use as-is
+            opening = f"{clean_desc[0].upper()}{clean_desc[1:]}."
+        else:
+            opening = f"{verb} {clean_desc}."
+    elif clean_desc:
+        # No verb mapping found -- keep original description as-is
+        opening = f"{desc.strip().rstrip('.')}."
+    else:
+        opening = f"{verb or 'Perform'} the {name.replace('_', ' ')} operation."
 
-    # 2. Add scenario trigger
+    # 2. Add scenario trigger (only if it adds value beyond the opening)
     scenario = ""
     for key, trigger in SCENARIO_TRIGGERS.items():
         if key in name_lower:
@@ -158,22 +173,16 @@ def _rewrite_local(tool: dict, all_tools: list[dict]) -> str:
     if not scenario:
         scenario = f"Use when the user wants to {name.replace('_', ' ')}."
 
-    # 3. Add disambiguation
+    # 3. Add disambiguation (only for genuinely similar tools)
     similar = _find_similar_tools(name, all_tools)
     disambig = ""
     if similar:
-        disambig = f" Unlike {', '.join(similar[:2])}, this tool specifically handles {name.replace('_', ' ')}."
+        disambig = f"Unlike {', '.join(similar[:2])}, this tool specifically handles {name.replace('_', ' ')}."
 
-    # 4. Add error guidance
-    category = _infer_category(name, desc)
-    error = ERROR_GUIDANCE.get(category, "")
-
-    # 5. Compose final description
+    # 4. Compose final description (no generic error boilerplate)
     parts = [opening, scenario]
     if disambig:
-        parts.append(disambig.strip())
-    if error:
-        parts.append(error)
+        parts.append(disambig)
 
     return " ".join(parts)
 
@@ -317,13 +326,24 @@ def _apply_rewrites(path: Path, results: list[dict]) -> int:
     if not rewrites:
         return 0
 
-    # Scan all source files for tool descriptions to replace
-    source_files = (
-        list(path.rglob("*.py"))
-        + list(path.rglob("*.ts"))
-        + list(path.rglob("*.js"))
+    # Scan source files, excluding test/build/non-MCP directories
+    skip_dirs = {
+        "node_modules", "__pycache__", ".venv", "venv", ".git", "dist",
+        "build", ".tox", ".mypy_cache", "__tests__", ".next", ".nuxt",
+    }
+    skip_file_patterns = re.compile(
+        r'(?:^test_|_test\.py$|\.test\.[jt]sx?$|\.spec\.[jt]sx?$'
+        r'|\.d\.ts$|\.config\.[jt]s$|\.stories\.[jt]sx?$)',
+        re.IGNORECASE,
     )
-    source_files = [f for f in source_files if "node_modules" not in str(f)]
+    source_files = []
+    for ext in ("*.py", "*.ts", "*.js"):
+        for f in path.rglob(ext):
+            if any(part in skip_dirs for part in f.parts):
+                continue
+            if skip_file_patterns.search(f.name):
+                continue
+            source_files.append(f)
 
     for source_file in source_files:
         try:
