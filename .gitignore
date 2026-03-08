@@ -30,3 +30,6 @@ test-targets/
 # Generated reports
 *.report.json
 fs-report.json
+
+# Internal docs (not published)
+docs/internal/
