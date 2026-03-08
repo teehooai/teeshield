@@ -1,0 +1,55 @@
+name: AgentShield Scan
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'MCP server path or GitHub URL to scan'
+        required: true
+        type: string
+      format:
+        description: 'Output format'
+        required: false
+        default: 'table'
+        type: choice
+        options:
+          - table
+          - json
+
+  # Can be called from other repos
+  workflow_call:
+    inputs:
+      target:
+        description: 'MCP server path to scan'
+        required: true
+        type: string
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install AgentShield
+        run: pip install -e .
+
+      - name: Run scan
+        run: |
+          agentshield scan "${{ inputs.target }}" --format "${{ inputs.format || 'table' }}"
+
+      - name: Run scan (JSON artifact)
+        if: always()
+        run: |
+          agentshield scan "${{ inputs.target }}" --format json -o scan-report.json || true
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentshield-report
+          path: scan-report.json
