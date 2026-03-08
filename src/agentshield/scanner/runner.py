@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import sys
+
 from rich.console import Console
 from rich.table import Table
 
@@ -15,6 +17,7 @@ from agentshield.scanner.description_quality import score_descriptions
 from agentshield.scanner.architecture_check import check_architecture
 
 console = Console()
+stderr_console = Console(file=sys.stderr)
 
 
 def resolve_target(target: str) -> Path:
@@ -40,24 +43,26 @@ def resolve_target(target: str) -> Path:
 
 def run_scan(target: str, output_path: str | None = None, output_format: str = "table"):
     """Run a full scan on an MCP server."""
-    console.print(f"\n[bold]Scanning:[/bold] {target}\n")
+    # Use stderr for progress when outputting JSON to stdout
+    log = stderr_console if (output_format == "json" and not output_path) else console
+    log.print(f"\n[bold]Scanning:[/bold] {target}\n")
 
     path = resolve_target(target)
 
     # Stage 1: License
-    console.print("[dim]Stage 1/4: License check...[/dim]")
+    log.print("[dim]Stage 1/4: License check...[/dim]")
     license_info, license_ok = check_license(path)
 
     # Stage 2: Security
-    console.print("[dim]Stage 2/4: Security scan...[/dim]")
+    log.print("[dim]Stage 2/4: Security scan...[/dim]")
     security_score, security_issues = scan_security(path)
 
     # Stage 3: Description quality
-    console.print("[dim]Stage 3/4: Description quality...[/dim]")
+    log.print("[dim]Stage 3/4: Description quality...[/dim]")
     desc_score, tool_scores, tool_names = score_descriptions(path)
 
     # Stage 4: Architecture
-    console.print("[dim]Stage 4/4: Architecture check...[/dim]")
+    log.print("[dim]Stage 4/4: Architecture check...[/dim]")
     arch_score, has_tests, has_error_handling = check_architecture(path)
 
     # Compute overall
