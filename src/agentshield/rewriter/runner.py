@@ -226,8 +226,18 @@ def run_rewrite(
         Path(output_path).write_text(json.dumps(results, indent=2))
         console.print(f"\n[green]Rewrites saved to {output_path}[/green]")
 
-    if not dry_run and not use_llm:
-        console.print("\n[dim]Tip: Set ANTHROPIC_API_KEY for higher-quality LLM-powered rewrites.[/dim]")
+    # Apply rewrites to source files
+    if not dry_run:
+        applied = _apply_rewrites(path, results)
+        if applied:
+            console.print(f"\n[green]Applied {applied} rewrites to source files.[/green]")
+        else:
+            console.print("\n[yellow]No rewrites could be applied to source files.[/yellow]")
+    else:
+        console.print("\n[dim]Dry run -- no files modified. Remove --dry-run to apply.[/dim]")
+
+    if not use_llm:
+        console.print("[dim]Tip: Set ANTHROPIC_API_KEY for higher-quality LLM-powered rewrites.[/dim]")
 
     console.print()
 
@@ -290,6 +300,56 @@ def _quick_score(desc: str) -> float:
     ) / 10.0 * 10.0
 
     return round(min(10.0, score), 1)
+
+
+def _apply_rewrites(path: Path, results: list[dict]) -> int:
+    """Apply rewritten descriptions back to source files.
+
+    Returns the number of rewrites successfully applied.
+    """
+    applied = 0
+
+    # Build a lookup of tool name -> rewritten description
+    rewrites = {r["name"]: r for r in results if r["original"] != r["rewritten"]}
+    if not rewrites:
+        return 0
+
+    # Scan all source files for tool descriptions to replace
+    source_files = (
+        list(path.rglob("*.py"))
+        + list(path.rglob("*.ts"))
+        + list(path.rglob("*.js"))
+    )
+    source_files = [f for f in source_files if "node_modules" not in str(f)]
+
+    for source_file in source_files:
+        try:
+            content = source_file.read_text(errors="ignore")
+        except OSError:
+            continue
+
+        original_content = content
+        modified = False
+
+        for tool_name, rewrite_info in rewrites.items():
+            old_desc = rewrite_info["original"]
+            new_desc = rewrite_info["rewritten"]
+
+            if not old_desc or old_desc not in content:
+                continue
+
+            # Replace the description in the file
+            content = content.replace(old_desc, new_desc, 1)
+            if content != original_content:
+                modified = True
+                applied += 1
+                console.print(f"  [green]+[/green] {tool_name} in {source_file.relative_to(path)}")
+                original_content = content
+
+        if modified:
+            source_file.write_text(content)
+
+    return applied
 
 
 def _has_anthropic_key() -> bool:
