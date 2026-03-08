@@ -135,7 +135,7 @@ def _extract_tools(path: Path) -> list[dict]:
             if name not in [t["name"] for t in tools]:
                 tools.append({"name": name, "description": desc})
 
-    # TypeScript: look for server.tool() or server.registerTool() calls
+    # TypeScript: look for tool definitions in .ts/.js files
     for ts_file in list(path.rglob("*.ts")) + list(path.rglob("*.js")):
         if any(part in skip_dirs for part in ts_file.parts):
             continue
@@ -144,51 +144,93 @@ def _extract_tools(path: Path) -> list[dict]:
         except OSError:
             continue
 
-        # Pattern 1: server.tool("name", { description: "..." })
+        existing_names = {t["name"] for t in tools}
+
+        # Build const variable map for resolving references like TOOL_NAME, TOOL_DESCRIPTION
+        const_vars: dict[str, str] = {}
+        for m in re.finditer(
+            r"const\s+(\w+)\s*(?::\s*\w+)?\s*=\s*(?:'([^']*)'|\"([^\"]*)\"|`([^`]*)`)",
+            content,
+        ):
+            const_vars[m.group(1)] = (m.group(2) or m.group(3) or m.group(4) or "").strip()
+
+        # Pattern 1: server.tool("name", { description: "..." }) or description: `...`
         tool_pattern = re.finditer(
-            r'server\.tool\(\s*["\'](\w+)["\'].*?description:\s*["\']([^"\']+)["\']',
+            r"server\.tool\(\s*['\"](\w+)['\"].*?description:\s*(?:'([^']*)'|\"([^\"]*)\"|`([^`]*)`)",
             content,
             re.DOTALL,
         )
         for match in tool_pattern:
-            tools.append({"name": match.group(1), "description": match.group(2).strip()})
+            name = match.group(1)
+            desc = (match.group(2) or match.group(3) or match.group(4) or "").strip()
+            if name not in existing_names:
+                tools.append({"name": name, "description": desc})
+                existing_names.add(name)
 
         # Pattern 2: server.registerTool("name", { description: "..." })
-        # Description may be a concatenated string with +
         reg_pattern = re.finditer(
-            r'server\.registerTool\(\s*["\'](\w+)["\']\s*,\s*\{[^}]*?description:\s*\n?\s*((?:["\'][^"\']*["\'](?:\s*\+\s*["\'][^"\']*["\'])*)|["\'][^"\']*["\'])',
+            r"server\.registerTool\(\s*['\"](\w+)['\"]\s*,\s*\{[^}]*?description:\s*\n?\s*((?:['\"][^'\"]*['\"](?:\s*\+\s*['\"][^'\"]*['\"])*)|['\"][^'\"]*['\"])",
             content,
             re.DOTALL,
         )
         for match in reg_pattern:
             name = match.group(1)
             raw_desc = match.group(2)
-            # Join concatenated strings: "foo" + "bar" -> "foobar"
-            desc = "".join(re.findall(r'["\']([^"\']*)["\']', raw_desc))
-            if name not in [t["name"] for t in tools]:
+            desc = "".join(re.findall(r"['\"]([^'\"]*)['\"]", raw_desc))
+            if name not in existing_names:
                 tools.append({"name": name, "description": desc.strip()})
+                existing_names.add(name)
 
-        # Pattern 3: Object literal tool defs (Supabase-style)
+        # Pattern 3: Object with name + description properties (Neon/PostgreSQL style)
+        # Matches: { name: 'tool_name' (as const)?, ..., description: '...' | `...` }
+        obj_tool_pattern = re.finditer(
+            r"name:\s*(?:'([^']*)'|\"([^\"]*)\")\s*(?:as\s+const)?\s*,"
+            r".*?description:\s*(?:'([^']*)'|\"([^\"]*)\"|`([^`]*)`)",
+            content,
+            re.DOTALL,
+        )
+        for match in obj_tool_pattern:
+            name = (match.group(1) or match.group(2) or "").strip()
+            desc = (match.group(3) or match.group(4) or match.group(5) or "").strip()
+            # Clean up multi-line template literals
+            desc = re.sub(r"\s*\n\s*", " ", desc).strip()
+            if name and name not in existing_names:
+                tools.append({"name": name, "description": desc})
+                existing_names.add(name)
+
+        # Pattern 4: Const variable resolution (git-mcp-server style)
+        # Matches: { name: TOOL_NAME, description: TOOL_DESCRIPTION }
+        const_ref_pattern = re.finditer(
+            r"name:\s+(\w+)\s*,.*?description:\s+(\w+)\s*,",
+            content,
+            re.DOTALL,
+        )
+        for match in const_ref_pattern:
+            name_var = match.group(1)
+            desc_var = match.group(2)
+            name = const_vars.get(name_var, "")
+            desc = const_vars.get(desc_var, "")
+            if name and desc and name not in existing_names:
+                tools.append({"name": name, "description": desc})
+                existing_names.add(name)
+
+        # Pattern 5: Object literal tool defs (Supabase-style)
         # e.g. { tool_name: { description: '...', parameters: ... } }
         obj_pattern = re.finditer(
-            r'(\w+)\s*:\s*\{\s*\n?\s*description\s*:\s*\n?\s*["\']([^"\']+)["\']',
+            r"(\w+)\s*:\s*\{\s*\n?\s*description\s*:\s*\n?\s*(?:'([^']*)'|\"([^\"]*)\"|`([^`]*)`)",
             content,
         )
         for match in obj_pattern:
             name = match.group(1)
-            desc = match.group(2).strip()
-            # Skip non-tool entries (common property names)
-            if name in {"type", "default", "title", "label", "name", "id", "key", "value", "message"}:
+            desc = (match.group(2) or match.group(3) or match.group(4) or "").strip()
+            desc = re.sub(r"\s*\n\s*", " ", desc).strip()
+            skip_names = {"type", "default", "title", "label", "name", "id", "key", "value", "message",
+                          "description", "scope", "inputSchema", "outputSchema", "annotations"}
+            if name in skip_names:
                 continue
-            if name not in [t["name"] for t in tools]:
+            if name not in existing_names:
                 tools.append({"name": name, "description": desc})
-
-        # Pattern 3b: Object literal with multi-line description
-        obj_pattern_ml = re.finditer(
-            r'(\w+)\s*:\s*\{\s*\n?\s*description\s*:\s*\n?\s*["\']([^"\']*)["\']',
-            content,
-        )
-        # Already handled by pattern above
+                existing_names.add(name)
 
     return tools
 
