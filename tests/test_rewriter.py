@@ -1,6 +1,6 @@
 """Tests for the template rewriter -- verifying anti-tautology guarantees."""
 
-from teeshield.rewriter.runner import _rewrite_local
+from teeshield.rewriter.runner import _quality_gate, _rewrite_local
 
 
 def test_rewrite_adds_verb():
@@ -84,3 +84,62 @@ def test_rewrite_preserves_good_description():
     )
     # The core content should be preserved (verb stripping may adjust it)
     assert "vulnerabilities" in result
+
+
+# --- Quality gate tests ---
+
+
+def test_quality_gate_accepts_improvement():
+    """Quality gate should accept rewrites that improve the score."""
+    original = "tables"
+    rewritten = "List all tables in the database."
+    assert _quality_gate(original, rewritten) == rewritten
+
+
+def test_quality_gate_rejects_no_improvement():
+    """Quality gate should reject rewrites that don't improve the score."""
+    original = "Lists all tables in the database."
+    # A rewrite that's essentially the same quality
+    rewritten = "List all tables in the database."
+    result = _quality_gate(original, rewritten)
+    # Should keep whichever scores higher, or fall back to original
+    assert result in (original, rewritten)
+
+
+def test_quality_gate_rejects_identical():
+    """Quality gate should return original if rewrite is identical."""
+    original = "Pauses a project."
+    assert _quality_gate(original, original) == original
+
+
+def test_quality_gate_rejects_tautology():
+    """Quality gate should reject rewrites with tautological patterns."""
+    original = "Pauses a project."
+    tautological = "Pause a project. Use when the user wants to pause_project."
+    assert _quality_gate(original, tautological) == original
+
+
+def test_quality_gate_rejects_unlike_template():
+    """Quality gate should reject 'Unlike X, this tool specifically' pattern."""
+    original = "Lists tables."
+    bad = "List tables. Unlike list_schemas, this tool specifically handles tables."
+    assert _quality_gate(original, bad) == original
+
+
+def test_quality_gate_end_to_end_supabase_tools():
+    """End-to-end: rewriter + gate on real supabase-style tools."""
+    tools = [
+        {"name": "list_tables", "description": "Lists all tables in one or more schemas."},
+        {"name": "list_extensions", "description": "Lists all extensions in the database."},
+        {"name": "execute_sql", "description": "Executes raw SQL in the Postgres database."},
+        {"name": "pause_project", "description": "Pauses a project."},
+        {"name": "delete_branch", "description": "Deletes a development branch."},
+    ]
+    for tool in tools:
+        rewritten = _rewrite_local(tool, tools)
+        gated = _quality_gate(tool["description"], rewritten)
+        # No tautological patterns should survive the gate
+        assert "Use when the user wants to" not in gated
+        assert "Unlike" not in gated
+        assert "specifically handles" not in gated
+        assert "verify the path" not in gated

@@ -58,26 +58,14 @@ VERB_MAP = {
     "close": "Close",
 }
 
-# Scenario triggers based on tool name patterns
+# Scenario triggers -- domain-neutral only.
+# Filesystem/git-specific scenarios removed in v0.2 because they produced
+# nonsensical output for non-filesystem tools (e.g. "list_extensions" ->
+# "see all available items in a collection or directory").
+# Only truly universal patterns are kept.
 SCENARIO_TRIGGERS = {
-    "read": "Use when the user needs to examine file contents or retrieve stored data.",
-    "write": "Use when the user wants to create or overwrite a file with new content.",
-    "create": "Use when the user wants to create a new resource that does not yet exist.",
-    "delete": "Use when the user wants to permanently remove a resource.",
-    "list": "Use when the user wants to see all available items in a collection or directory.",
-    "search": "Use when the user wants to find items matching specific criteria or patterns.",
-    "get": "Use when the user needs to retrieve a specific resource by identifier.",
-    "edit": "Use when the user wants to modify part of an existing file without rewriting it entirely.",
-    "move": "Use when the user wants to relocate or rename a file or resource.",
-    "diff": "Use when the user wants to see what changed between two versions.",
-    "add": "Use when the user wants to stage changes or append to an existing collection.",
-    "commit": "Use when the user wants to save staged changes as a permanent snapshot.",
-    "checkout": "Use when the user wants to switch to a different branch or restore files.",
-    "log": "Use when the user wants to review history or past activity.",
-    "status": "Use when the user wants to check the current state of the working environment.",
-    "fetch": "Use when the user wants to retrieve content from a URL or remote source.",
-    "query": "Use when the user wants to extract specific data using a structured query.",
-    "reset": "Use when the user wants to undo staged changes or restore to a previous state.",
+    "search": "Use when the user wants to find items matching specific criteria.",
+    "diff": "Use when the user wants to compare two versions.",
 }
 
 # NOTE: Generic error guidance removed (v0.2).
@@ -149,6 +137,36 @@ def _rewrite_local(tool: dict, all_tools: list[dict]) -> str:
     return " ".join(parts)
 
 
+def _quality_gate(original: str, rewritten: str) -> str:
+    """Return the rewrite only if it genuinely improves the description score.
+
+    Falls back to the original if:
+    - Score did not improve
+    - Rewrite is identical to original
+    - Rewrite contains known tautological patterns
+    """
+    if original == rewritten:
+        return original
+
+    # Reject known tautological patterns
+    tautology_patterns = [
+        r"Use when the user wants to \w+[_ ]\w+",
+        r"Unlike \w+,? this tool specifically",
+        r"verify the path is within allowed directories",
+        r"Check file permissions if access is denied",
+    ]
+    for pat in tautology_patterns:
+        if re.search(pat, rewritten, re.IGNORECASE):
+            return original
+
+    orig_score = _quick_score(original)
+    new_score = _quick_score(rewritten)
+
+    if new_score > orig_score:
+        return rewritten
+    return original
+
+
 def run_rewrite(
     server_path: str,
     model: str = "claude-sonnet-4-20250514",
@@ -178,6 +196,7 @@ def run_rewrite(
     console.print(f"Found {len(tools)} tools to rewrite.\n")
 
     results = []
+    skipped = 0
     for tool in tools:
         original = tool["description"]
 
@@ -186,11 +205,22 @@ def run_rewrite(
         else:
             rewritten = _rewrite_local(tool, tools)
 
+        # Quality gate: only keep rewrite if it genuinely improves the score
+        rewritten = _quality_gate(original, rewritten)
+        if rewritten == original:
+            skipped += 1
+
         results.append({
             "name": tool["name"],
             "original": original,
             "rewritten": rewritten,
         })
+
+    if skipped:
+        console.print(
+            f"[yellow]Quality gate: {skipped}/{len(tools)} rewrites "
+            f"rejected (no score improvement).[/yellow]\n"
+        )
 
     # Print comparison table
     _print_comparison(results)
@@ -274,7 +304,9 @@ def _quick_score(desc: str) -> float:
     elif len(desc) > 500:
         length_score = 0.7
 
-    score = (
+    from teeshield.scanner.description_quality import _semantic_density
+
+    raw_score = (
         (1.0 if has_verb else 0.0) * 1.5
         + (1.0 if has_scenario else 0.0) * 3.0
         + (1.0 if has_param_docs else 0.0) * 1.5
@@ -283,6 +315,7 @@ def _quick_score(desc: str) -> float:
         + 1.0 * 1.0  # assume decent disambiguation for rewrites
         + length_score * 0.5
     )
+    score = raw_score * _semantic_density(desc)
 
     return round(min(10.0, score), 1)
 

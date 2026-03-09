@@ -33,12 +33,12 @@ src/teeshield/
 
 ## Evolution Mode Protocol
 
-TeeShield uses evidence-driven evolution (see docs/observations/001-audit-quality-evolution-2026-03-08.md).
+TeeShield uses evidence-driven evolution (see docs/internal/001-audit-quality-evolution-2026-03-08.md).
 
 ### Per-Change Cycle
 1. **Evidence first**: Before changing a scanner, document the false positive/negative that motivates the change
 2. **Measure before/after**: Run `teeshield scan` on test-targets/ before and after changes
-3. **Update observation doc**: Record what changed and why in docs/observations/
+3. **Update observation doc**: Record what changed and why in docs/internal/
 
 ### Scanner Quality Rules
 - Security scanner: Minimize false positives. A false positive erodes trust more than a missed issue.

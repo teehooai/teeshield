@@ -88,6 +88,9 @@ def score_descriptions(
         elif len(desc) > 500:
             length_score = 0.7
 
+        # 8. Semantic density: penalize keyword-stuffing / low-content text
+        semantic_density = _semantic_density(desc)
+
         # Weighted scoring -- total weights = 10.0
         # Core structure (must-have for good scores):
         #   action_verb: 1.5  -- descriptions MUST start with a verb
@@ -99,7 +102,7 @@ def score_descriptions(
         # Context signals:
         #   disambig:    1.0  -- distinctness from sibling tools
         #   length:      0.5  -- adequate length
-        overall = (
+        raw_score = (
             (1.0 if has_action_verb else 0.0) * 1.5
             + (1.0 if has_scenario else 0.0) * 3.0
             + (1.0 if has_param_docs else 0.0) * 1.5
@@ -108,6 +111,9 @@ def score_descriptions(
             + disambiguation * 1.0
             + length_score * 0.5
         )
+        # Semantic density acts as a multiplier -- keyword-stuffed garbage
+        # gets scaled down proportionally
+        overall = raw_score * semantic_density
 
         scores.append(
             ToolDescriptionScore(
@@ -294,6 +300,64 @@ def _extract_tools(path: Path) -> list[dict]:
                 existing_names.add(name)
 
     return tools
+
+
+# Words that are scoring triggers -- don't count toward semantic content
+_TRIGGER_WORDS = frozenset({
+    "use", "when", "this", "for", "call", "the", "to", "a", "an", "is", "it",
+    "e.g.", "example", "instance", "such", "as", "like",
+    "error", "fail", "fails", "failed", "invalid", "exception", "raise",
+    "troubleshoot", "common", "issue",
+    "param", "parameter", "parameters", "input", "argument",
+    "accepts", "takes", "requires", "expects",
+    "if", "or", "and", "of", "in", "on", "by", "with", "from", "that",
+    "not", "no", "do", "does", "did", "will", "can", "should", "may",
+    "user", "wants",
+})
+
+
+def _semantic_density(desc: str) -> float:
+    """Measure the ratio of meaningful content words vs trigger/filler words.
+
+    Returns a multiplier between 0.3 and 1.0:
+    - 1.0 = rich semantic content (most words carry meaning)
+    - 0.3 = mostly trigger keywords with little real content
+
+    This prevents keyword-stuffing from inflating scores.
+    """
+    if not desc.strip():
+        return 1.0  # Don't penalize empty (already penalized by length)
+
+    words = re.findall(r'[a-zA-Z_]\w*', desc.lower())
+    if len(words) < 3:
+        return 1.0  # Too short to judge density
+
+    # Count unique content words (not trigger/filler)
+    unique_content = {w for w in words if w not in _TRIGGER_WORDS and len(w) > 1}
+    # Count total unique words
+    unique_total = {w for w in words if len(w) > 1}
+
+    if not unique_total:
+        return 0.3
+
+    density = len(unique_content) / len(unique_total)
+
+    # Also penalize high word repetition (e.g. "read read read")
+    if len(words) > 0:
+        repetition_ratio = len(set(words)) / len(words)
+    else:
+        repetition_ratio = 1.0
+
+    # Combine: low density OR high repetition = penalty
+    combined = min(density, repetition_ratio)
+
+    # Map to 0.3-1.0 range (never fully zero out a score)
+    if combined >= 0.4:
+        return 1.0
+    elif combined >= 0.25:
+        return 0.7
+    else:
+        return 0.3
 
 
 def _word_overlap(a: str, b: str, stop_words: set[str] | None = None) -> float:
