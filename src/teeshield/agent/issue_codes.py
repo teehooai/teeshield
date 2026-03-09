@@ -132,6 +132,10 @@ SKILL_WARNING_CODES: dict[str, IssueCode] = {
         "TS-W010", "toxic_flow_destructive", "warning",
         "Data source + destructive action combination (ransom/wipe risk)",
     ),
+    "not_in_allowlist": IssueCode(
+        "TS-W011", "not_in_allowlist", "warning",
+        "Skill not in approved allowlist",
+    ),
 }
 
 # --- Config Scanner: Config codes ---

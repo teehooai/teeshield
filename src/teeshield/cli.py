@@ -83,6 +83,11 @@ def harden(server_path: str, read_only: bool, truncate_limit: int, dry_run: bool
     default=None,
     help="Scan policy preset (strict=all, balanced=default, permissive=errors only)",
 )
+@click.option(
+    "--allowlist", "allowlist_path",
+    default=None,
+    help="Path to approved skills JSON (skills not listed get TS-W011)",
+)
 def agent_check(
     agent_dir: str | None,
     skills: bool,
@@ -92,6 +97,7 @@ def agent_check(
     fmt: str,
     ignore_codes: tuple[str, ...],
     policy: str | None,
+    allowlist_path: str | None,
 ):
     """Scan an AI agent installation for security issues.
 
@@ -124,6 +130,18 @@ def agent_check(
         from teeshield.agent.pinning import verify_all_skills
         pin_findings = verify_all_skills(agent_path)
         result.skill_findings.extend(pin_findings)
+
+    if allowlist_path and "not_in_allowlist" not in ignored:
+        from teeshield.agent.allowlist import check_allowlist, load_allowlist
+        allowlist = load_allowlist(Path(allowlist_path))
+        installed_names = [sf.skill_name for sf in result.skill_findings]
+        result.skill_findings.extend(check_allowlist(installed_names, allowlist))
+
+    # Populate audit framework coverage
+    result.audit_framework.source_checked = verify or allowlist_path is not None
+    result.audit_framework.code_checked = skills
+    result.audit_framework.permission_checked = True  # config scanner always checks
+    result.audit_framework.risk_checked = True  # verdict/severity always computed
 
     if fix or dry_run:
         from teeshield.agent.fixer import fix_findings

@@ -131,6 +131,27 @@ def _print_summary(result: ScanResult) -> None:
             f"{fixable} issue(s)[/dim]"
         )
 
+    # Audit framework coverage
+    af = result.audit_framework
+    checks = {
+        "Source": af.source_checked,
+        "Code": af.code_checked,
+        "Permission": af.permission_checked,
+        "Risk": af.risk_checked,
+    }
+    coverage_parts = []
+    for name, checked in checks.items():
+        icon = "[green]✓[/green]" if checked else "[dim]✗[/dim]"
+        coverage_parts.append(f"{icon} {name}")
+    summary_parts.append(
+        f"Audit coverage: {af.coverage_pct}% ({' '.join(coverage_parts)})"
+    )
+    if af.coverage < 4:
+        missing = [n for n, c in checks.items() if not c]
+        summary_parts.append(
+            f"[dim]Tip: use --verify/--allowlist to enable {', '.join(missing)} checks[/dim]"
+        )
+
     console.print(Panel("\n".join(summary_parts), title="Summary"))
     console.print()
 

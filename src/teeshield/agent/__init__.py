@@ -5,6 +5,7 @@ and provides auto-fix capabilities. Ported from SpiderShield.
 """
 
 from .models import (
+    AuditFramework,
     Finding,
     ScanResult,
     Severity,
@@ -13,6 +14,7 @@ from .models import (
 )
 
 __all__ = [
+    "AuditFramework",
     "Finding",
     "ScanResult",
     "Severity",
