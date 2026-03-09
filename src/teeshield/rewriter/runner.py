@@ -9,21 +9,9 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 
+from .quality_gate import _quick_score, quality_gate
+
 console = Console()
-
-REWRITE_SYSTEM_PROMPT = """\
-You are an expert at writing MCP tool descriptions that help AI agents select the correct tool.
-
-Given an original tool description, rewrite it following these rules:
-1. ACTION-ORIENTED: Start with a verb (e.g., "Query", "Create", "List")
-2. SCENARIO TRIGGER: Include "Use when the user wants to..." guidance
-3. PARAMETER EXAMPLES: Add concrete examples for key parameters
-4. ERROR GUIDANCE: Mention common errors and how to handle them
-5. DISAMBIGUATION: If similar tools exist, explain when to use THIS one vs others
-6. CONCISE: Keep under 200 words
-
-Return ONLY the improved description text, nothing else.
-"""
 
 # Template-based rewriting rules (no API needed)
 VERB_MAP = {
@@ -64,11 +52,9 @@ SCENARIO_TRIGGERS = {
     "diff": "Use when the user wants to compare two versions.",
 }
 
-# Domain-specific scenarios (v0.2.1): only fire when the tool name contains
+# Domain-specific scenarios: only fire when the tool name contains
 # the keyword AND at least one sibling tool contains a domain signal.
-# This prevents false matches like "list_extensions" -> filesystem scenario.
 DOMAIN_SCENARIOS: list[tuple[str, list[str], str]] = [
-    # (keyword_in_name, [sibling_signal_keywords], scenario_text)
     # Filesystem
     ("read_file", ["write_file", "list_file", "directory"],
      "Use when the user wants to view the contents of a specific file."),
@@ -91,11 +77,14 @@ DOMAIN_SCENARIOS: list[tuple[str, list[str], str]] = [
      "Use when the user wants to retrieve content from a URL."),
 ]
 
-# NOTE: Generic error guidance removed (v0.2).
-# Tautological boilerplate like "If the path does not exist, verify the path"
-# was the #1 reason PRs got rejected. Error guidance must be domain-specific
-# and is only appropriate in LLM-powered rewrites, not templates.
-
+# Words that indicate the remaining text is a complete sentence (not a verb complement).
+# Excludes determiners like "a", "an", "the", "all" which can be verb complements
+# (e.g., "List all tables" -> "all" is part of the object, not a sentence starter).
+_SENTENCE_STARTERS = {
+    "this", "it", "returns", "performs", "provides",
+    "retrieves", "generates", "handles", "manages", "processes", "supports",
+    "allows", "enables", "sends", "shows", "displays", "given",
+}
 
 
 def _rewrite_local(tool: dict, all_tools: list[dict]) -> str:
@@ -110,33 +99,55 @@ def _rewrite_local(tool: dict, all_tools: list[dict]) -> str:
 
     # Clean up original description -- strip any leading verb so we don't double-prefix
     clean_desc = desc.strip().rstrip(".")
-    # Remove leading adverb + verb phrase (e.g. "Recursively search for..." -> "for files...")
-    leading_verb = re.match(
-        r'^(?:(?:Recursively|Safely|Securely|Efficiently)\s+)?'
-        r'(?:Get|Show|List|Read|Write|Create|Delete|Move|Search|Find|Retrieve|'
-        r'Execute|Run|Make|Return|Record|Unstage|Switch|Add|Fetch|Compare|Commit|'
-        r'Reset|Edit|Copy|Rename|Open|Close|Set|Update|Remove|Query)(?:s|es|ed|ing)?\s+',
-        clean_desc, re.IGNORECASE
-    )
-    if leading_verb:
-        clean_desc = clean_desc[leading_verb.end():]
+    if not clean_desc:
+        return f"{verb or 'Perform'} the {name.replace('_', ' ')} operation."
 
-    # Avoid stuttering: if the verb (or a form of it) already appears near the
-    # start of clean_desc, don't prepend it again.
-    if verb and clean_desc:
-        first_words = clean_desc.lower().split()[:5]
-        verb_stem = verb.lower().rstrip("es").rstrip("s")
-        already_has_verb = any(w.startswith(verb_stem) for w in first_words)
-        if already_has_verb:
-            # Capitalize first letter and use as-is
-            opening = f"{clean_desc[0].upper()}{clean_desc[1:]}."
-        else:
-            opening = f"{verb} {clean_desc}."
-    elif clean_desc:
-        # No verb mapping found -- keep original description as-is
-        opening = f"{desc.strip().rstrip('.')}."
+    # Detect non-description content (type signatures, code snippets)
+    # These contain characters like : | [ ] that don't appear in natural language descriptions
+    if re.search(r'\w+:\s*\w+\[', clean_desc) or clean_desc.count("|") >= 2:
+        return f"{verb or 'Perform'} the {name.replace('_', ' ')} operation."
+
+    # Check if the description is a complete sentence starting with a pronoun/article/etc.
+    # In that case, don't strip the leading verb -- the original phrasing is intentional.
+    first_desc_word = clean_desc.split()[0].lower()
+    is_complete_sentence = first_desc_word in _SENTENCE_STARTERS
+
+    if is_complete_sentence:
+        # Keep the original text as-is (capitalize first letter, add period)
+        opening = f"{clean_desc[0].upper()}{clean_desc[1:]}."
     else:
-        opening = f"{verb or 'Perform'} the {name.replace('_', ' ')} operation."
+        # Try to strip leading verb phrase to avoid duplication
+        leading_verb = re.match(
+            r'^(?:(?:Recursively|Safely|Securely|Efficiently)\s+)?'
+            r'(?:Get|Show|List|Read|Write|Create|Delete|Move|Search|Find|Retrieve|'
+            r'Execute|Run|Make|Return|Record|Unstage|Switch|Add|Fetch|Compare|Commit|'
+            r'Reset|Edit|Copy|Rename|Open|Close|Set|Update|Remove|Query)(?:s|es|ed|ing)?\s+',
+            clean_desc, re.IGNORECASE,
+        )
+        if leading_verb:
+            remainder = clean_desc[leading_verb.end():]
+            # Safety: if the remainder is too short or starts with a preposition
+            # that doesn't make sense as a verb complement, keep original
+            if len(remainder.split()) < 2:
+                opening = f"{desc.strip().rstrip('.')}."
+            else:
+                clean_desc = remainder
+                # Re-check for verb complement fitness
+                if verb:
+                    opening = f"{verb} {clean_desc}."
+                else:
+                    opening = f"{clean_desc[0].upper()}{clean_desc[1:]}."
+        elif verb:
+            # No leading verb to strip -- check for stuttering
+            first_words = clean_desc.lower().split()[:5]
+            verb_stem = verb.lower().rstrip("es").rstrip("s")
+            already_has_verb = any(w.startswith(verb_stem) for w in first_words)
+            if already_has_verb:
+                opening = f"{clean_desc[0].upper()}{clean_desc[1:]}."
+            else:
+                opening = f"{verb} {clean_desc}."
+        else:
+            opening = f"{desc.strip().rstrip('.')}."
 
     # 2. Add scenario trigger (domain-neutral first, then domain-specific)
     scenario = ""
@@ -155,10 +166,6 @@ def _rewrite_local(tool: dict, all_tools: list[dict]) -> str:
                     break
 
     # 3. Compose final description
-    # NOTE: Mechanical disambiguation ("Unlike X, this tool specifically
-    # handles Y") removed in v0.2 -- it was the #1 pattern flagged by
-    # maintainers as tautological.  Genuine disambiguation requires
-    # understanding what the tools actually do differently.
     parts = [opening]
     if scenario:
         parts.append(scenario)
@@ -166,48 +173,89 @@ def _rewrite_local(tool: dict, all_tools: list[dict]) -> str:
     return " ".join(parts)
 
 
+def _extract_params(tool: dict) -> list[dict] | None:
+    """Extract parameter info from tool schema if available."""
+    schema = tool.get("inputSchema", tool.get("parameters"))
+    if not isinstance(schema, dict) or "properties" not in schema:
+        return None
+    required = set(schema.get("required", []))
+    params = []
+    for pname, pinfo in schema["properties"].items():
+        params.append({
+            "name": pname,
+            "type": pinfo.get("type", "string"),
+            "required": pname in required,
+            "description": pinfo.get("description", ""),
+        })
+    return params
+
+
+def _rewrite_llm(
+    tool: dict,
+    all_tools: list[dict],
+    provider,
+    model: str | None = None,
+    min_score: float = 9.8,
+    max_retries: int = 2,
+) -> str:
+    """Rewrite a single tool description using LLM provider with self-check loop.
+
+    Flow: generate -> score -> if below min_score, diagnose missing criteria -> retry.
+    Maximum `max_retries` attempts total (1 initial + retries).
+    """
+    from .prompt import build_rewrite_prompt
+    from .quality_gate import _quick_score, diagnose_missing
+
+    params = _extract_params(tool)
+    siblings = [{"name": t["name"], "description": t.get("description", "")} for t in all_tools]
+
+    system_prompt, user_prompt = build_rewrite_prompt(
+        tool_name=tool["name"],
+        original_description=tool.get("description", ""),
+        parameters=params,
+        sibling_tools=siblings,
+    )
+
+    # Attempt 1: initial generation
+    result = provider.complete(system_prompt, user_prompt, max_tokens=500)
+    score = _quick_score(result)
+
+    # Self-check loop: diagnose and retry if below threshold
+    for attempt in range(max_retries):
+        if score >= min_score:
+            break
+
+        hints = diagnose_missing(result, min_score)
+        if not hints:
+            break  # Score is fine or no actionable hints
+
+        # Build retry prompt with specific feedback
+        feedback = (
+            f"SELF-CHECK FAILED: Your rewrite scored {score:.1f}/10 but needs "
+            f"{min_score}/10.\n\n"
+            f"Missing criteria that MUST be added:\n"
+            + "\n".join(f"- {h}" for h in hints)
+            + "\n\nIMPORTANT: You MUST address every missing criterion listed above. "
+            "Each one adds significant score weight. For parameters, use `backtick` "
+            "notation. For examples, use 'e.g.' prefix. For errors, use 'Raises' or "
+            "'fails'. Return ONLY the improved description, nothing else."
+        )
+        retry_prompt = f"{user_prompt}\n\n---\n\nPrevious attempt:\n{result}\n\n{feedback}"
+
+        result = provider.complete(system_prompt, retry_prompt, max_tokens=500)
+        score = _quick_score(result)
+
+    return result
+
+
+# Keep old function signatures for backward compatibility with tests
 def _quality_gate(original: str, rewritten: str) -> str:
     """Return the rewrite only if it genuinely improves the description score.
 
-    Falls back to the original if:
-    - Score did not improve
-    - Rewrite is identical to original
-    - Rewrite contains known tautological patterns
+    Delegates to the new quality_gate module.
     """
-    if original == rewritten:
-        return original
-
-    # Reject known tautological patterns.
-    # The first pattern catches mechanical triggers that just restate the
-    # tool name ("Use when the user wants to read files.") but allows
-    # domain-specific triggers with richer phrasing (>= 5 words after "to",
-    # e.g. "Use when the user wants to view the contents of a specific file.").
-    static_tautology_patterns = [
-        r"Unlike \w+,? this tool specifically",
-        r"verify the path is within allowed directories",
-        r"Check file permissions if access is denied",
-    ]
-    for pat in static_tautology_patterns:
-        if re.search(pat, rewritten, re.IGNORECASE):
-            return original
-
-    # Check for short tautological "Use when" triggers
-    trigger_match = re.search(
-        r"Use when the user wants to (.+?)\.(?:\s|$)",
-        rewritten, re.IGNORECASE,
-    )
-    if trigger_match:
-        trigger_body = trigger_match.group(1).split()
-        # <= 3 words after "to" is tautological (e.g. "read the file")
-        if len(trigger_body) <= 3:
-            return original
-
-    orig_score = _quick_score(original)
-    new_score = _quick_score(rewritten)
-
-    if new_score > orig_score:
-        return rewritten
-    return original
+    result = quality_gate(original, rewritten)
+    return result.description
 
 
 def run_rewrite(
@@ -215,6 +263,8 @@ def run_rewrite(
     model: str = "claude-sonnet-4-20250514",
     dry_run: bool = False,
     output_path: str | None = None,
+    engine: str = "auto",
+    provider_name: str | None = None,
 ):
     """Rewrite tool descriptions in an MCP server."""
     path = Path(server_path)
@@ -231,32 +281,51 @@ def run_rewrite(
         return
 
     # Decide rewrite engine
-    use_llm = _has_anthropic_key()
-    engine = "Claude API" if use_llm else "template-based"
+    llm_provider = None
+    if engine in ("llm", "auto"):
+        from .providers import detect_provider
+
+        llm_provider = detect_provider(provider=provider_name, model=model)
+
+    use_llm = engine == "llm" or (engine == "auto" and llm_provider is not None)
+    if engine == "llm" and llm_provider is None:
+        console.print(
+            "[red]LLM engine requested but no API key found. "
+            "Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY.[/red]"
+        )
+        raise SystemExit(1)
+
+    engine_label = f"LLM ({llm_provider.__class__.__name__})" if use_llm else "template-based"
 
     console.print(f"\n[bold]Rewriting tool descriptions:[/bold] {server_path}")
-    console.print(f"[dim]Engine: {engine} | Dry run: {dry_run}[/dim]")
+    console.print(f"[dim]Engine: {engine_label} | Dry run: {dry_run}[/dim]")
     console.print(f"Found {len(tools)} tools to rewrite.\n")
 
     results = []
     skipped = 0
     for tool in tools:
-        original = tool["description"]
+        original = tool.get("description", "")
 
-        if use_llm:
-            rewritten = _rewrite_llm(tool, tools, model)
+        if use_llm and llm_provider:
+            try:
+                rewritten = _rewrite_llm(tool, tools, llm_provider, model)
+            except Exception as e:
+                console.print(f"[yellow]LLM failed for {tool['name']}: {e}[/yellow]")
+                rewritten = _rewrite_local(tool, tools)
         else:
             rewritten = _rewrite_local(tool, tools)
 
-        # Quality gate: only keep rewrite if it genuinely improves the score
-        rewritten = _quality_gate(original, rewritten)
-        if rewritten == original:
+        # Quality gate: only keep rewrite if it passes all checks
+        gate_result = quality_gate(original, rewritten, tool_name=tool["name"])
+        if not gate_result.passed:
             skipped += 1
+        rewritten = gate_result.description
 
         results.append({
             "name": tool["name"],
             "original": original,
             "rewritten": rewritten,
+            "score": gate_result.score,
         })
 
     if skipped:
@@ -284,7 +353,10 @@ def run_rewrite(
         console.print("\n[dim]Dry run -- no files modified. Remove --dry-run to apply.[/dim]")
 
     if not use_llm:
-        console.print("[dim]Tip: Set ANTHROPIC_API_KEY for higher-quality LLM-powered rewrites.[/dim]")
+        console.print(
+            "[dim]Tip: Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY "
+            "for higher-quality LLM-powered rewrites.[/dim]"
+        )
 
     console.print()
 
@@ -294,13 +366,21 @@ def _print_comparison(results: list[dict]):
 
     table = Table(title="Description Rewrite Results", show_lines=True)
     table.add_column("Tool", style="bold", width=20)
-    table.add_column("Original", width=40)
-    table.add_column("Rewritten", width=50)
+    table.add_column("Original", width=35)
+    table.add_column("Rewritten", width=40)
+    table.add_column("Score", width=5, justify="right")
 
     for r in results:
-        orig_preview = r["original"][:80] + "..." if len(r["original"]) > 80 else r["original"]
-        new_preview = r["rewritten"][:80] + "..." if len(r["rewritten"]) > 80 else r["rewritten"]
-        table.add_row(r["name"], f"[dim]{orig_preview}[/dim]", f"[green]{new_preview}[/green]")
+        orig_preview = r["original"][:70] + "..." if len(r["original"]) > 70 else r["original"]
+        new_preview = r["rewritten"][:70] + "..." if len(r["rewritten"]) > 70 else r["rewritten"]
+        score = r.get("score", 0)
+        score_color = "green" if score >= 9.8 else "yellow" if score >= 8.0 else "red"
+        table.add_row(
+            r["name"],
+            f"[dim]{orig_preview}[/dim]",
+            f"[green]{new_preview}[/green]",
+            f"[{score_color}]{score:.1f}[/{score_color}]",
+        )
 
     console.print(table)
 
@@ -315,52 +395,14 @@ def _print_comparison(results: list[dict]):
     avg_new = sum(new_scores) / len(new_scores) if new_scores else 0
     delta = avg_new - avg_orig
 
+    above_98 = sum(1 for s in new_scores if s >= 9.8)
+
     console.print("\n[bold]Description Quality:[/bold]")
     console.print(f"  Before: {avg_orig:.1f}/10")
     console.print(f"  After:  {avg_new:.1f}/10")
     color = "green" if delta > 0 else "red"
     console.print(f"  Change: [{color}]{'+' if delta > 0 else ''}{delta:.1f}[/{color}]")
-
-
-def _quick_score(desc: str) -> float:
-    """Quick-score a description using the same criteria as the scanner."""
-    from teeshield.scanner.description_quality import _ACTION_VERBS
-
-    first_word = desc.split()[0].lower().rstrip("s") if desc.strip() else ""
-    has_verb = first_word in _ACTION_VERBS or first_word.rstrip("e") in _ACTION_VERBS
-    has_scenario = bool(re.search(r"(?:use (?:this )?when|use for|call this)", desc, re.I))
-    has_examples = bool(re.search(r"(?:e\.g\.|example|for instance|such as|like )", desc, re.I))
-    has_error = bool(
-        re.search(r"(?:error|fail|common issue|if .* fails|troubleshoot|raise|exception|invalid)", desc, re.I)
-    )
-    has_param_docs = bool(re.search(
-        r"(?:param(?:eter)?s?|input|argument|accepts?|takes?|requires?|expects?)\s*[:.)]", desc, re.I,
-    )) or bool(re.search(r"`\w+`", desc))
-
-    length_score = 1.0
-    if len(desc) < 20:
-        length_score = 0.2
-    elif len(desc) < 50:
-        length_score = 0.5
-    elif len(desc) < 80:
-        length_score = 0.7
-    elif len(desc) > 500:
-        length_score = 0.7
-
-    from teeshield.scanner.description_quality import _semantic_density
-
-    raw_score = (
-        (1.0 if has_verb else 0.0) * 1.5
-        + (1.0 if has_scenario else 0.0) * 3.0
-        + (1.0 if has_param_docs else 0.0) * 1.5
-        + (1.0 if has_examples else 0.0) * 1.5
-        + (1.0 if has_error else 0.0) * 1.0
-        + 1.0 * 1.0  # assume decent disambiguation for rewrites
-        + length_score * 0.5
-    )
-    score = raw_score * _semantic_density(desc)
-
-    return round(min(10.0, score), 1)
+    console.print(f"  >= 9.8: {above_98}/{len(new_scores)} tools")
 
 
 def _apply_rewrites(path: Path, results: list[dict]) -> int:
@@ -415,41 +457,12 @@ def _apply_rewrites(path: Path, results: list[dict]) -> int:
             if content != original_content:
                 modified = True
                 applied += 1
-                console.print(f"  [green]+[/green] {tool_name} in {source_file.relative_to(path)}")
+                console.print(
+                    f"  [green]+[/green] {tool_name} in {source_file.relative_to(path)}"
+                )
                 original_content = content
 
         if modified:
             source_file.write_text(content)
 
     return applied
-
-
-def _has_anthropic_key() -> bool:
-    """Check if Anthropic API key is available."""
-    import os
-    return bool(os.environ.get("ANTHROPIC_API_KEY"))
-
-
-def _rewrite_llm(
-    tool: dict, all_tools: list[dict], model: str
-) -> str:
-    """Rewrite a single tool description using Claude API."""
-    import anthropic
-
-    other_tool_names = [t["name"] for t in all_tools if t["name"] != tool["name"]]
-
-    user_prompt = f"""Tool name: {tool['name']}
-Original description: {tool['description']}
-Other tools in this server: {', '.join(other_tool_names)}
-
-Rewrite the description following the rules."""
-
-    client = anthropic.Anthropic()
-    response = client.messages.create(
-        model=model,
-        max_tokens=500,
-        system=REWRITE_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_prompt}],
-    )
-
-    return response.content[0].text.strip()

@@ -16,6 +16,17 @@ _ACTION_VERBS = (
     "reset", "restore", "backup", "export", "import", "subscribe", "publish",
     "retrieve", "return", "compute", "calculate", "open", "close", "log",
     "commit", "push", "pull", "merge", "checkout", "diff", "apply", "revert",
+    "compare", "switch", "expand", "stage", "unstage", "inspect", "browse",
+    "download", "upload", "submit", "approve", "reject", "assign", "unassign",
+    "pin", "unpin", "archive", "resolve", "test", "debug", "trace", "profile",
+    "pause", "resume", "rebase", "squash", "cherry-pick", "stash", "tag",
+    "obtain", "purchase", "request", "grant", "revoke", "invoke", "trigger",
+    "schedule", "cancel", "retry", "abort", "suspend", "terminate", "restart",
+    "migrate", "seed", "provision", "deprovision", "scale", "replicate",
+    "confirm", "verify", "authenticate", "authorize", "register", "deregister",
+    "rebuild", "redeploy", "rollback", "promote", "demote", "fork", "clone",
+    "sync", "refresh", "flush", "clear", "purge", "truncate", "aggregate",
+    "batch", "stream", "emit", "broadcast", "notify", "alert", "warn",
 )
 
 
@@ -66,7 +77,9 @@ def score_descriptions(
         has_param_docs = bool(re.search(
             r"(?:param(?:eter)?s?|input|argument|accepts?|takes?|requires?|expects?)\s*[:.]",
             desc, re.I,
-        )) or bool(re.search(r"`\w+`", desc))  # backtick-quoted param names
+        )) or bool(re.search(r"`\w+`", desc)) or bool(  # backtick-quoted param names
+            re.search(r"--\w+", desc)  # CLI-style --flag params
+        )
 
         # 6. Disambiguation: specificity vs other tools (using content words only)
         disambiguation = 1.0
