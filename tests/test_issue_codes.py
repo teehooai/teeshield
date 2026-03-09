@@ -30,7 +30,8 @@ class TestIssueCodeRegistry:
 
     def test_no_duplicate_codes(self) -> None:
         codes = [ic.code for ic in ALL_CODES.values()]
-        assert len(codes) == len(set(codes)), f"Duplicate codes: {[c for c in codes if codes.count(c) > 1]}"
+        dupes = [c for c in codes if codes.count(c) > 1]
+        assert len(codes) == len(set(codes)), f"Duplicate codes: {dupes}"
 
     def test_error_codes_start_with_ts_e(self) -> None:
         for name, ic in SKILL_ERROR_CODES.items():

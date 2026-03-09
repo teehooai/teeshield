@@ -248,7 +248,8 @@ class TestLocationInfo:
             ),
         ])
         sarif = scan_result_to_sarif(result)
-        uri = sarif["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+        loc = sarif["runs"][0]["results"][0]["locations"][0]
+        uri = loc["physicalLocation"]["artifactLocation"]["uri"]
         assert "SKILL.md" in uri
 
 

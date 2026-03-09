@@ -305,7 +305,10 @@ def _check_tool_profile(config: dict, _dir: Path) -> Finding | None:
             check_id="tools.full_no_deny",
             title='Tool profile "full" with no deny list',
             severity=Severity.HIGH,
-            description="Agent has access to ALL tools including automation, runtime, and filesystem",
+            description=(
+                "Agent has access to ALL tools including"
+                " automation, runtime, and filesystem"
+            ),
             fix_hint='Add "deny": ["group:automation", "group:runtime"] or use "messaging" profile',
             auto_fixable=True,
             current_value="full, deny=[]",

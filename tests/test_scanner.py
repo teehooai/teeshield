@@ -203,7 +203,10 @@ def test_security_ts_child_process(tmp_path: Path):
 def test_security_ts_sql_template_literal(tmp_path: Path):
     """Template literal interpolation in SQL queries should be flagged."""
     ts_file = tmp_path / "db.ts"
-    ts_file.write_text('async function q(table: string) {\n  await pool.query(`SELECT * FROM ${table}`);\n}\n')
+    ts_file.write_text(
+        "async function q(table: string) {\n"
+        "  await pool.query(`SELECT * FROM ${table}`);\n}\n"
+    )
     score, issues = scan_security(tmp_path)
     assert any(i.category == "ts_sql_injection" for i in issues)
 
