@@ -308,6 +308,20 @@ def scan_single_skill(
             matched.append("excessive_permissions")
             has_suspicious = True
 
+    # Check for toxic flows (dangerous capability combinations)
+    from .toxic_flow import detect_toxic_flows
+
+    toxic_flows = detect_toxic_flows(content)
+    for tf in toxic_flows:
+        pattern_name = f"toxic_flow_{tf.flow_type}"
+        if pattern_name in ignored:
+            continue
+        code = get_issue_code(pattern_name)
+        prefix = f"[{code}] " if code else ""
+        issues.append(f"{prefix}{tf.description}")
+        matched.append(pattern_name)
+        has_suspicious = True
+
     # Determine verdict
     if has_malicious:
         verdict = SkillVerdict.MALICIOUS

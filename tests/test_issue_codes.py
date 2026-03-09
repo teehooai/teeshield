@@ -61,10 +61,10 @@ class TestIssueCodeRegistry:
 
     def test_expected_counts(self) -> None:
         assert len(SKILL_ERROR_CODES) == 15
-        assert len(SKILL_WARNING_CODES) == 8
+        assert len(SKILL_WARNING_CODES) == 10
         assert len(CONFIG_CODES) == 18
         assert len(PIN_CODES) == 2
-        assert len(ALL_CODES) == 43
+        assert len(ALL_CODES) == 45
 
 
 class TestGetIssueCode:

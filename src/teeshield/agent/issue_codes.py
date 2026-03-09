@@ -124,6 +124,14 @@ SKILL_WARNING_CODES: dict[str, IssueCode] = {
         "TS-W008", "excessive_permissions", "warning",
         "Excessive permission request for stated purpose",
     ),
+    "toxic_flow_exfiltration": IssueCode(
+        "TS-W009", "toxic_flow_exfiltration", "warning",
+        "Data source + public sink combination (exfiltration risk)",
+    ),
+    "toxic_flow_destructive": IssueCode(
+        "TS-W010", "toxic_flow_destructive", "warning",
+        "Data source + destructive action combination (ransom/wipe risk)",
+    ),
 }
 
 # --- Config Scanner: Config codes ---
