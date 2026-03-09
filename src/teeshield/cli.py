@@ -87,16 +87,37 @@ def rewrite(
 @click.argument("server_path")
 @click.option("--read-only/--no-read-only", default=True, help="Enable read-only defaults")
 @click.option("--truncate-limit", default=100, help="Max rows/items in tool responses")
-def harden(server_path: str, read_only: bool, truncate_limit: int):
+@click.option(
+    "--engine", type=click.Choice(["template", "llm", "auto"]), default="auto",
+    help="Fix engine: template (free), llm (generates code fixes), auto (detect)",
+)
+@click.option(
+    "--provider", "provider_name",
+    type=click.Choice(["claude", "openai", "gemini"]),
+    default=None, help="LLM provider (auto-detected from env vars if not set)",
+)
+def harden(
+    server_path: str,
+    read_only: bool,
+    truncate_limit: int,
+    engine: str,
+    provider_name: str | None,
+):
     """Suggest security hardening for an MCP server (advisory only).
 
     Scans for: insecure credential handling, missing input validation,
     unbounded query results, and write operations that should default
     to read-only. Prints suggestions but does not modify any files.
+
+    With --engine llm, generates concrete code fix suggestions using
+    an LLM with self-check validation.
     """
     from teeshield.hardener.runner import run_harden
 
-    run_harden(server_path, read_only=read_only, truncate_limit=truncate_limit)
+    run_harden(
+        server_path, read_only=read_only, truncate_limit=truncate_limit,
+        engine=engine, provider_name=provider_name,
+    )
 
 
 @main.command(name="agent-check")
@@ -196,8 +217,8 @@ def agent_check(
         from teeshield.agent.report import print_report
         print_report(result)
     elif fmt == "json":
-        import json
         import dataclasses
+        import json
         console.print(json.dumps(dataclasses.asdict(result), indent=2))
     elif fmt == "sarif":
         from teeshield.agent.sarif import sarif_to_json, scan_result_to_sarif
@@ -205,7 +226,7 @@ def agent_check(
         console.print(sarif_to_json(sarif))
 
     # Exit codes based on policy
-    from teeshield.agent.models import SkillVerdict, Severity
+    from teeshield.agent.models import Severity, SkillVerdict
     if any(sf.verdict == SkillVerdict.TAMPERED for sf in result.skill_findings):
         raise SystemExit(2)
     if any(f.severity == Severity.CRITICAL for f in result.findings):
@@ -231,6 +252,7 @@ def agent_pin():
 def pin_add(skill_path: str, pin_dir: str | None):
     """Pin a single skill by recording its content hash."""
     from pathlib import Path
+
     from teeshield.agent.pinning import pin_skill
 
     pin_path = Path(pin_dir) if pin_dir else None
@@ -244,6 +266,7 @@ def pin_add(skill_path: str, pin_dir: str | None):
 def pin_add_all(agent_dir: str | None, pin_dir: str | None):
     """Pin all installed skills."""
     from pathlib import Path
+
     from teeshield.agent.pinning import pin_all_skills
 
     agent_path = Path(agent_dir) if agent_dir else None
@@ -259,6 +282,7 @@ def pin_add_all(agent_dir: str | None, pin_dir: str | None):
 def pin_list(pin_dir: str | None):
     """List all pinned skills."""
     from pathlib import Path
+
     from teeshield.agent.pinning import list_pins
 
     pin_path = Path(pin_dir) if pin_dir else None
@@ -276,8 +300,9 @@ def pin_list(pin_dir: str | None):
 def pin_verify(agent_dir: str | None, pin_dir: str | None):
     """Verify all pinned skills against their recorded hashes."""
     from pathlib import Path
-    from teeshield.agent.pinning import verify_all_skills
+
     from teeshield.agent.models import SkillVerdict
+    from teeshield.agent.pinning import verify_all_skills
 
     agent_path = Path(agent_dir) if agent_dir else None
     pin_path = Path(pin_dir) if pin_dir else None
@@ -311,6 +336,7 @@ def pin_verify(agent_dir: str | None, pin_dir: str | None):
 def pin_remove(skill_name: str, pin_dir: str | None):
     """Remove a skill's pin."""
     from pathlib import Path
+
     from teeshield.agent.pinning import unpin_skill
 
     pin_path = Path(pin_dir) if pin_dir else None
@@ -326,7 +352,10 @@ def pin_remove(skill_name: str, pin_dir: str | None):
 @click.option("--scenarios", "-s", default=None, help="Path to test scenarios YAML")
 @click.option("--models", "-m", multiple=True, default=["claude-sonnet-4-20250514"])
 @click.option("--llm", is_flag=True, help="Use LLM for evaluation (requires ANTHROPIC_API_KEY)")
-def evaluate(original: str, improved: str, scenarios: str | None, models: tuple[str, ...], llm: bool):
+def evaluate(
+    original: str, improved: str, scenarios: str | None,
+    models: tuple[str, ...], llm: bool,
+):
     """Compare tool selection accuracy before and after improvements.
 
     Uses heuristic keyword matching by default (free, no API key needed).

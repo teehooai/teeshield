@@ -107,10 +107,10 @@ class TestGoldenScoring:
         server_file = tmp_path / "server.py"
         lines = ["from mcp import Server", "", "server = Server('golden')", ""]
         for tool in GOLDEN_TOOLS:
-            lines.append(f'@server.tool()')
+            lines.append('@server.tool()')
             lines.append(f'def {tool["name"]}():')
             lines.append(f'    """{tool["description"]}"""')
-            lines.append(f'    pass')
+            lines.append('    pass')
             lines.append("")
         server_file.write_text("\n".join(lines))
         avg_score, per_tool, _ = score_descriptions(tmp_path)

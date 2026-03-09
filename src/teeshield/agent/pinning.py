@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -80,7 +80,7 @@ def pin_skill(
     content = skill_path.read_text(encoding="utf-8")
     content_hash = _hash_content(content)
     skill_name = _skill_key(skill_path)
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
 
     pin_file = _resolve_pin_file(pin_dir)
     pins = _load_pins(pin_file)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 
 import yaml
@@ -147,31 +146,14 @@ def _evaluate_server(
     tool_descriptions = "\n".join(
         f"- {t['name']}: {t['description']}" for t in tools
     )
+    tool_name_list = [t["name"] for t in tools]
 
     for scenario in scenarios:
         for model in models:
-            start = time.time()
-            try:
-                response = client.messages.create(
-                    model=model,
-                    max_tokens=50,
-                    system="You are selecting the best tool for a user's request. Reply with ONLY the tool name, nothing else.",
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": f"Available tools:\n{tool_descriptions}\n\nUser request: {scenario['intent']}\n\nWhich tool should be used? Reply with only the tool name.",
-                        }
-                    ],
-                )
-                selected = response.content[0].text.strip().lower()
-                latency = (time.time() - start) * 1000
-            except Exception as e:
-                console.print(f"[red]Error: {e}[/red]")
-                selected = "error"
-                latency = None
-
-            # Fuzzy match the tool name
-            matched_tool = _fuzzy_match_tool(selected, [t["name"] for t in tools])
+            matched_tool = _llm_select_with_retry(
+                client, model, tool_descriptions, tool_name_list,
+                scenario["intent"],
+            )
 
             results.append(
                 EvalResult(
@@ -180,11 +162,67 @@ def _evaluate_server(
                     selected_tool=matched_tool,
                     correct=matched_tool == scenario["expected_tool"],
                     model=model,
-                    latency_ms=latency,
                 )
             )
 
     return results
+
+
+def _llm_select_with_retry(
+    client,
+    model: str,
+    tool_descriptions: str,
+    tool_names: list[str],
+    intent: str,
+    max_retries: int = 1,
+) -> str:
+    """Ask LLM to select a tool, with retry if response is invalid.
+
+    Self-check: if the LLM response doesn't match any known tool name,
+    retry once with a more explicit prompt listing exact valid names.
+    """
+    system = (
+        "You are selecting the best tool for a user's request. "
+        "Reply with ONLY the tool name, nothing else."
+    )
+    user_msg = (
+        f"Available tools:\n{tool_descriptions}\n\n"
+        f"User request: {intent}\n\n"
+        f"Which tool should be used? Reply with only the tool name."
+    )
+
+    for attempt in range(1 + max_retries):
+        try:
+            response = client.messages.create(
+                model=model,
+                max_tokens=50,
+                system=system,
+                messages=[{"role": "user", "content": user_msg}],
+            )
+            selected = response.content[0].text.strip().lower()
+        except Exception as e:
+            console.print(f"[red]Error: {e}[/red]")
+            return "error"
+
+        matched = _fuzzy_match_tool(selected, tool_names)
+
+        # Self-check: did we get a valid match?
+        if matched in tool_names:
+            return matched
+
+        # Invalid match -- retry with explicit tool list
+        if attempt < max_retries:
+            valid_names = ", ".join(tool_names)
+            user_msg = (
+                f"Available tools:\n{tool_descriptions}\n\n"
+                f"User request: {intent}\n\n"
+                f"IMPORTANT: You MUST reply with EXACTLY one of these tool names: "
+                f"{valid_names}\n"
+                f"Your previous answer '{selected}' was not a valid tool name. "
+                f"Reply with only the tool name."
+            )
+
+    return matched
 
 
 def _heuristic_match(intent: str, tools: list[dict]) -> str:

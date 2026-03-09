@@ -10,15 +10,12 @@ Covers:
 
 from __future__ import annotations
 
-import pytest
-
 from teeshield.agent.issue_codes import (
     ALL_CODES,
     CONFIG_CODES,
     PIN_CODES,
     SKILL_ERROR_CODES,
     SKILL_WARNING_CODES,
-    IssueCode,
     get_issue_code,
     resolve_codes,
 )

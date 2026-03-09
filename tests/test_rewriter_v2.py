@@ -449,7 +449,7 @@ class TestSelfCheckRetry:
         from teeshield.rewriter.runner import _rewrite_llm
 
         tool = {"name": "list_tables", "description": "Lists tables."}
-        result = _rewrite_llm(tool, [tool], MockProvider(), min_score=9.0, max_retries=2)
+        _rewrite_llm(tool, [tool], MockProvider(), min_score=9.0, max_retries=2)
         assert call_count == 1  # No retry needed
 
     def test_max_retries_respected(self) -> None:

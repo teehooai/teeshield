@@ -16,7 +16,7 @@ import secrets
 import shutil
 from pathlib import Path
 
-from .models import Finding, Severity
+from .models import Finding
 
 
 def fix_findings(
