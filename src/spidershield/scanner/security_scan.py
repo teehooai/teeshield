@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 
 from spidershield.models import SecurityIssue
+
 from .semgrep_scan import (
     SEMGREP_AVAILABLE,
     SEMGREP_COVERED_CATEGORIES,
@@ -332,9 +333,9 @@ def scan_security(path: Path) -> tuple[float, list[SecurityIssue]]:
         # rules like dangerous_eval and sql_injection on TS/JS files
         # to avoid false positives from RegExp.exec(), cursor.execute(), etc.)
         # Also skip categories already covered by Semgrep to avoid duplicates.
-        _PY_ONLY_RULES = {"dangerous_eval", "sql_injection", "unsafe_deserialization"}
+        _py_only_rules = {"dangerous_eval", "sql_injection", "unsafe_deserialization"}
         for category, config in DANGEROUS_PATTERNS.items():
-            if is_ts_js and category in _PY_ONLY_RULES:
+            if is_ts_js and category in _py_only_rules:
                 continue
             if SEMGREP_AVAILABLE and category in SEMGREP_COVERED_CATEGORIES:
                 continue  # Semgrep handles this category with higher precision

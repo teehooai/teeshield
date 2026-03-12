@@ -306,7 +306,6 @@ def _rewrite_llm(
     siblings = [{"name": t["name"], "description": t.get("description", "")} for t in all_tools]
 
     # v2 (E2): provide template draft as warm start + pre-diagnosed missing signals
-    from .quality_gate import diagnose_missing
     template_draft = _rewrite_local(tool, all_tools)
     template_score_val = _quick_score(template_draft)
     missing = diagnose_missing(template_draft)

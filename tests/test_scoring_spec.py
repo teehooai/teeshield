@@ -8,7 +8,6 @@ from spidershield.scoring_spec import (
     DESC_WEIGHTS,
     GRADE_THRESHOLDS,
     META_WEIGHTS,
-    SEVERITY_PENALTIES,
     SPEC_VERSION,
     spec_architecture_bonus,
     spec_description_composite,

@@ -1,6 +1,5 @@
 """SpiderShield SDK self-check: verify all open-source features work."""
 
-import inspect
 import json
 import os
 import tempfile
@@ -276,7 +275,7 @@ print(f"  Total: {total} checks | Pass: {checks['pass']} | Fail: {checks['fail']
 pct = checks["pass"] / total * 100 if total else 0
 print(f"  Score: {pct:.1f}%")
 if checks["fail"] == 0:
-    print(f"  \033[32mALL CHECKS PASSED\033[0m")
+    print("  \033[32mALL CHECKS PASSED\033[0m")
 else:
     print(f"  \033[31m{checks['fail']} CHECKS FAILED\033[0m")
 print(f"{'='*50}")

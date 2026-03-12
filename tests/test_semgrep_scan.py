@@ -9,18 +9,15 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-import pytest
-
+from spidershield.scanner.security_scan import scan_security
 from spidershield.scanner.semgrep_scan import (
     SEMGREP_COVERED_CATEGORIES,
     _parse_semgrep_output,
     _rule_id_to_category,
     run_semgrep,
 )
-from spidershield.scanner.security_scan import scan_security
-
 
 # ---------------------------------------------------------------------------
 # Module-level constants

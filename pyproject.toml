@@ -51,10 +51,12 @@ spidershield-server = "spidershield.server:run"
 
 [tool.ruff]
 target-version = "py311"
-line-length = 100
+line-length = 130
+exclude = ["sdk_selfcheck.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["E402"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

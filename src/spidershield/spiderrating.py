@@ -17,10 +17,6 @@ from datetime import UTC, datetime
 from importlib.metadata import version as _pkg_version
 
 from spidershield.scoring_spec import (
-    ARCHITECTURE_BONUS_MAX,
-    DESC_WEIGHTS,
-    META_WEIGHTS,
-    SEVERITY_PENALTIES,
     spec_architecture_bonus,
     spec_description_composite,
     spec_grade,

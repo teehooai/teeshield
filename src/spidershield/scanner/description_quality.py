@@ -243,8 +243,7 @@ def _extract_tools(path: Path) -> list[dict]:
 
     # Monorepo detection: if path has many subdirs with their own package files,
     # try to find MCP-related subdirectories and prioritize those
-    mcp_subdirs = _find_mcp_subdirs(path)
-    search_root = path
+    _find_mcp_subdirs(path)
 
     # Python: look for @tool or @server.tool decorators
     for py_file in path.rglob("*.py"):
