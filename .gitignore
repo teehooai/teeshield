@@ -34,3 +34,8 @@ fs-report.json
 # Internal docs (not published)
 docs/internal/
 docs/observations/
+
+# Website build artifacts
+website/.next/
+website/out/
+website/node_modules/
