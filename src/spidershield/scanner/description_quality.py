@@ -118,6 +118,15 @@ def score_descriptions(
             re.search(r"--\w+", desc)  # CLI-style --flag params
         )
 
+        # 5b. Return value documentation: describes what the tool outputs
+        return_pat = (
+            r"(?:returns?\s|outputs?\s|produces?\s|yields?\s"
+            r"|result(?:s| is| will be)"
+            r"|response (?:is|contains|includes)"
+            r"|→)"
+        )
+        has_return_docs = bool(re.search(return_pat, desc, re.I))
+
         # 6. Disambiguation: specificity vs other tools (using content words only)
         disambiguation = 1.0
         for other in tools:
@@ -143,20 +152,22 @@ def score_descriptions(
 
         # Weighted scoring -- total weights = 10.0
         # Core structure (must-have for good scores):
-        #   action_verb: 1.5  -- descriptions MUST start with a verb
-        #   scenario:    3.0  -- "use when" is the most impactful guidance
-        #   param_docs:  1.5  -- parameters need documentation
+        #   action_verb:  1.5  -- descriptions MUST start with a verb
+        #   scenario:     2.5  -- "use when" is the most impactful guidance
+        #   param_docs:   1.5  -- parameters need documentation
+        #   return_docs:  1.0  -- LLMs need to know what output to expect
         # Quality signals:
-        #   examples:    1.5  -- concrete examples help LLMs
-        #   error:       1.0  -- failure guidance
+        #   examples:     1.0  -- concrete examples help LLMs
+        #   error:        1.0  -- failure guidance
         # Context signals:
-        #   disambig:    1.0  -- distinctness from sibling tools
-        #   length:      0.5  -- adequate length
+        #   disambig:     1.0  -- distinctness from sibling tools
+        #   length:       0.5  -- adequate length
         raw_score = (
             (1.0 if has_action_verb else 0.0) * 1.5
-            + (1.0 if has_scenario else 0.0) * 3.0
+            + (1.0 if has_scenario else 0.0) * 2.5
             + (1.0 if has_param_docs else 0.0) * 1.5
-            + (1.0 if has_examples else 0.0) * 1.5
+            + (1.0 if has_return_docs else 0.0) * 1.0
+            + (1.0 if has_examples else 0.0) * 1.0
             + (1.0 if has_error_guidance else 0.0) * 1.0
             + disambiguation * 1.0
             + length_score * 0.5
@@ -173,6 +184,7 @@ def score_descriptions(
                 has_param_examples=has_examples,
                 has_error_guidance=has_error_guidance,
                 has_param_docs=has_param_docs,
+                has_return_docs=has_return_docs,
                 disambiguation_score=round(disambiguation, 2),
                 overall_score=round(min(10.0, overall), 1),
             )

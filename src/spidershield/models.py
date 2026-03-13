@@ -37,6 +37,7 @@ class ToolDescriptionScore(BaseModel):
     has_param_examples: bool
     has_error_guidance: bool
     has_param_docs: bool = Field(default=False, description="Documents parameters/inputs")
+    has_return_docs: bool = Field(default=False, description="Documents return value or output format")
     disambiguation_score: float = Field(ge=0, le=1, description="How distinct from other tools")
     overall_score: float = Field(ge=0, le=10)
     suggested_rewrite: str | None = None

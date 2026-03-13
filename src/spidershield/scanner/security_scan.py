@@ -135,6 +135,50 @@ DANGEROUS_PATTERNS = {
         "description": "MCP tool handler accepts raw string input without validation",
         "fix": "Add input validation (length limits, allowlists, sanitization)",
     },
+    "unsafe_path_resolution": {
+        "patterns": [
+            # Path(user_input).read_text() without prior resolve()/is_relative_to()
+            # Only flag when the Path constructor wraps a variable (not a literal)
+            r"Path\(\s*(?![\"\'/])\w+\s*\)\.(?:read_text|read_bytes|write_text|write_bytes|open|unlink|rmdir)\(",
+            # open(f"...{var}...") without os.path.realpath / resolve
+            r"open\(\s*f[\"'][^\"']*\{[^}]+\}",
+        ],
+        "severity": "high",
+        "description": "File operation on user-controlled path without validation or sandboxing",
+        "fix": "Resolve paths with Path.resolve() and verify with is_relative_to(base_dir)",
+    },
+    "async_shell_injection": {
+        "patterns": [
+            # asyncio.create_subprocess_shell with f-string or variable
+            r"create_subprocess_shell\(\s*f[\"']",
+            r"create_subprocess_shell\(\s*(?![\"'])\w+",
+            # asyncio.subprocess via shell=True
+            r"asyncio\.subprocess.*shell\s*=\s*True",
+        ],
+        "severity": "critical",
+        "description": "Async shell command with user-controlled input -- command injection risk",
+        "fix": "Use asyncio.create_subprocess_exec with explicit argument lists",
+    },
+    "basic_auth_in_url": {
+        "patterns": [
+            # http://user:password@host pattern in source code (not comments)
+            r'^[^#\n]*["\']https?://[^/\s"\']*:[^/\s@"\']+@[^/\s"\']+',
+        ],
+        "severity": "high",
+        "description": "Credentials embedded in URL -- basic auth in URL exposes secrets in logs and history",
+        "fix": "Pass credentials via headers, environment variables, or a secret manager",
+    },
+    "timing_attack_comparison": {
+        "patterns": [
+            # Direct string comparison of secrets (== with password/token/secret variable)
+            # Exclude comparisons to None, True, False, empty string
+            r"(?:password|token|secret|api_key)\s*==\s*(?!(?:None|True|False|\"\")\b)\w",
+            r"==\s*(?:password|token|secret|api_key)\b",
+        ],
+        "severity": "medium",
+        "description": "Secret compared with == operator -- timing side-channel may leak value length",
+        "fix": "Use hmac.compare_digest() or secrets.compare_digest() for constant-time comparison",
+    },
 }
 
 # TypeScript / JavaScript specific patterns (checked only for .ts/.js files)
@@ -200,6 +244,18 @@ TS_DANGEROUS_PATTERNS = {
         "severity": "critical",
         "description": "Potential SQL injection -- query built with template literal interpolation",
         "fix": "Use parameterized queries ($1, $2) instead of template literal interpolation",
+    },
+    "ts_async_injection": {
+        "patterns": [
+            # Bun.spawn / Deno.run with template literal
+            r"Bun\.spawn\(\s*`[^`]*\$\{",
+            r"Deno\.run\(\s*\{[^}]*cmd\s*:\s*`[^`]*\$\{",
+            # Node child_process.spawn with shell: true + template
+            r"spawn\([^)]*\{[^}]*shell\s*:\s*true",
+        ],
+        "severity": "critical",
+        "description": "Async process spawn with user-controlled command -- injection risk",
+        "fix": "Use explicit argument arrays instead of shell strings",
     },
     "ts_path_traversal": {
         "patterns": [
