@@ -110,6 +110,21 @@ class TestProviderDetection:
             p = detect_provider()
             assert p is not None
 
+    def test_explicit_gemini(self) -> None:
+        pytest.importorskip("google.generativeai", reason="google-generativeai not installed")
+        with patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}, clear=False):
+            p = detect_provider(provider="gemini")
+            assert p is not None
+            assert "Gemini" in type(p).__name__
+
+    def test_auto_detect_gemini_via_google_key(self) -> None:
+        pytest.importorskip("google.generativeai", reason="google-generativeai not installed")
+        env = {"ANTHROPIC_API_KEY": "", "OPENAI_API_KEY": "", "GOOGLE_API_KEY": "test-key"}
+        with patch.dict("os.environ", env, clear=False):
+            p = detect_provider()
+            assert p is not None
+            assert "Gemini" in type(p).__name__
+
     def test_custom_model(self) -> None:
         with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test"}, clear=False):
             p = detect_provider(provider="claude", model="claude-haiku-4-5-20251001")
