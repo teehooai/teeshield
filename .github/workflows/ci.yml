@@ -47,11 +47,9 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         python-version: ['3.11', '3.12', '3.13']
         exclude:
-          # Windows: only test latest Python to keep CI fast
+          # Windows: skip 3.11 to keep CI fast, but test 3.12 + 3.13
           - os: windows-latest
             python-version: '3.11'
-          - os: windows-latest
-            python-version: '3.12'
 
     steps:
       - uses: actions/checkout@v4
