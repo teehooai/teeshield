@@ -33,7 +33,7 @@ def quality_gate(
     original: str,
     rewritten: str,
     tool_name: str = "",
-    score_fn: Callable[..., object] | None = None,
+    score_fn: Callable[..., tuple[float, float]] | None = None,
 ) -> GateResult:
     """Return the rewrite only if it passes all quality checks.
 
